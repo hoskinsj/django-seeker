@@ -1647,3 +1647,129 @@ class AdvancedSavedSearchView(View):
             else:
                 return SavedSearchModel.objects.none()
         return SavedSearchModel.objects.filter(**filter_kwargs)
+
+
+class FieldOptions:
+
+    @classmethod
+    def configure_seeker_view(cls, seeker_view):
+        if not seeker_view.fields:
+            return
+        
+        settings = cls._extract_settings(seeker_view.fields)
+        for k, v in settings.items():
+            setattr(seeker_view, k, v)
+
+    @classmethod
+    def _extract_settings(cls, options):
+        settings = {}
+
+        settings['display'] = [
+            option.id
+            for option in sorted(
+                options,
+                key=lambda option: option.sort_order
+            )
+            if option.display
+        ]
+        settings['facets'] = [
+            option.initialize_facet()
+            for option in options
+            if option.facet_class
+        ]
+        settings['sort_fields'] = {
+            option.id: option.field_id
+            for option in options
+            if option.sort_field
+        }
+        settings['initial_facets'] = {
+            option.field_id : option.initial
+            for option in options
+            if option.initial
+        }
+        settings['field_templates'] = {
+            option.template
+            for option in options
+            if option.template
+        }
+        settings['field_columns'] = {
+            option.id : option.column
+            for option in options
+            if option.column
+        }
+        settings['field_labels'] = {
+            option.id : option.label
+            for option in options
+            if option.label
+        }
+        settings['highlight_fields'] = {
+            option.id: option.field_id
+            for option in options
+            if option.highlight
+        }
+        settings['required_display'] = [
+            (option.id, option.required_display_index)
+            for option in options
+            if option.required_display_index is not None
+        ]
+        settings['exclude'] = [
+            option.id
+            for option in options
+            if option.exclude
+        ]
+
+        # Do not return empty settings values
+        return {k: v for k, v in settings.items() if v}
+
+    def __init__(self, id, suffix='', label=None, facet_class=None,
+                 value_formatter=None, display=False, sort_order=0, initial=None,
+                 sort_field=False, facet_kwargs=None, highlight=False,
+                 search=True, template=None, column=None, required_display_index=None,
+                 exclude=False):
+        
+        if facet_kwargs is None:
+            facet_kwargs = {}
+        
+        self.id = id
+        self.suffix = suffix
+        self.label = label
+        self.initial = initial
+        self.sort_order = sort_order
+        self.sort_field = sort_field
+        self.display = display or sort_order is not None
+        
+        self.facet_class = facet_class
+        self.facet_kwargs = {}
+        if self.label:
+            self.facet_kwargs['label'] = self.label
+        self.facet_kwargs.update(facet_kwargs)
+        
+        self.column = column
+        self.highlight = highlight
+        self.template = template
+        self.required_display_index = required_display_index
+        self.exclude = exclude
+
+    def initialize_facet(self):
+        if self.facet_class:
+            return self.facet_class(self.field_id, **self.facet_kwargs)
+        return None
+
+    @property
+    def field_id(self):
+        return self.id + self.suffix
+
+class AdvancedFieldOptions(FieldOptions):
+    @classmethod
+    def _extract_settings(cls, options):
+        settings = super(extract_settings, self)._extract_settings()
+        settings['value_formats'] = {
+            option.id: option.value_formatter
+            for option in options
+            if option.value_formatter
+        }
+        return settings
+
+    def __init__(self, id, *kwargs):
+        self.value_formatter = kwargs.pop('value_formatter', None)
+        super(AdvancedFieldOptions, self).__init__(id, **kwargs)
