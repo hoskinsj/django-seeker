@@ -34,7 +34,123 @@ from .templatetags.seeker import seeker_format
 
 seekerview_field_templates = {}
 
+class ConfigDescriptor(object):
+    def __init__(self, default, value_function):
+        self.value = default
+        self._cached = False
+        self.value_function = value_function
 
+    def __get__(self, instance, owner):
+        if hasattr(owner, 'fields') and not self._cached:
+            self.value = self.value_function(owner.fields)
+            self._cached = True
+        return self.value
+
+class FieldOptions(object):
+    FIELD_VALUE_FUNCTIONS = {
+        'display': lambda options: [
+            option.field_id for option in
+            sorted(options, key=lambda option: option.sort_order)
+            if option.display
+        ],
+        'facets': lambda options: [
+            option.initialize_facet()
+            for option in options
+            if option.facet_class
+        ],
+        'sort_fields': lambda options: {
+            option.field_id: option.extended_field_id
+            for option in options
+            if option.sort_field
+        },
+        'initial_facets': lambda options: {
+            option.extended_field_id : option.initial
+            for option in options
+            if option.initial
+        },
+        'field_templates': lambda options: {
+            option.template
+            for option in options
+            if option.template
+        },
+        'field_columns': lambda options: {
+            option.field_id : option.column
+            for option in options
+            if option.column
+        },
+        'field_labels': lambda options: {
+            option.field_id : option.label
+            for option in options
+            if option.label
+        },
+        'highlight_fields': lambda options: {
+            option.field_id: option.extended_field_id
+            for option in options
+            if option.highlight
+        },
+        'required_display': lambda options: [
+            (option.field_id, option.required_display_index)
+            for option in options
+            if option.required_display_index is not None
+        ],
+        'exclude': lambda options: [
+            option.field_id
+            for option in options
+            if option.exclude
+        ]
+    }
+
+    def __init__(self, field_id, suffix='', label=None, facet_class=None,
+                 display=False, sort_order=None, initial=None,
+                 sort_field=False, facet_kwargs=None, highlight=False,
+                 search=True, template=None, column=None, required_display_index=None,
+                 exclude=False):
+        
+        if facet_kwargs is None:
+            facet_kwargs = {}
+        
+        self.field_id = field_id
+        self.suffix = suffix
+        self.label = label
+        self.initial = initial
+        self.sort_order = sort_order
+        self.sort_field = sort_field
+        self.display = display or sort_order is not None
+        
+        self.facet_class = facet_class
+        self.facet_kwargs = {}
+        if self.label:
+            self.facet_kwargs['label'] = self.label
+        self.facet_kwargs.update(facet_kwargs)
+        
+        self.column = column
+        self.highlight = highlight
+        self.template = template
+        self.required_display_index = required_display_index
+        self.exclude = exclude
+
+    def initialize_facet(self):
+        if self.facet_class:
+            return self.facet_class(self.extended_field_id, **self.facet_kwargs)
+        return None
+
+    @property
+    def extended_field_id(self):
+        return self.field_id + self.suffix
+
+class AdvancedFieldOptions(FieldOptions):
+    FIELD_VALUE_FUNCTIONS = FieldOptions.FIELD_VALUE_FUNCTIONS
+    FIELD_VALUE_FUNCTIONS.update({
+        'value_formats': lambda options: {
+            option.field_id: option.value_formatter
+            for option in options
+            if option.value_formatter
+        }
+    })
+
+    def __init__(self, field_id, **kwargs):
+        self.value_formatter = kwargs.pop('value_formatter', None)
+        super(AdvancedFieldOptions, self).__init__(field_id, **kwargs)
 
 class Column(object):
     """
@@ -202,17 +318,17 @@ class SeekerView(View):
     A list of Column objects, or strings representing mapping field names. If None, all mapping fields will be available.
     """
 
-    exclude = None
+    exclude = ConfigDescriptor(None, FieldOptions.FIELD_VALUE_FUNCTIONS['exclude'])
     """
     A list of field names to exclude when generating columns.
     """
 
-    display = None
+    display = ConfigDescriptor(None, FieldOptions.FIELD_VALUE_FUNCTIONS['display'])
     """
     A list of field/column names to display by default.
     """
 
-    required_display = []
+    required_display = ConfigDescriptor([], FieldOptions.FIELD_VALUE_FUNCTIONS['required_display'])
     """
     A list of tuples, ex. ('field name', 0), representing field/column names that will always be displayed (cannot be hidden by the user).
     The second value is the index/position of the field (used as the index in list.insert(index, 'field name')).
@@ -243,12 +359,12 @@ class SeekerView(View):
     'default' (no encoding) or 'html' (will escape html, if you use html highlighting tags).
     """
 
-    facets = []
+    facets = ConfigDescriptor([], FieldOptions.FIELD_VALUE_FUNCTIONS['facets'])
     """
     A list of :class:`seeker.Facet` objects that are available to facet the results by.
     """
 
-    initial_facets = {}
+    initial_facets = ConfigDescriptor({}, FieldOptions.FIELD_VALUE_FUNCTIONS['initial_facets'])
     """
     A dictionary of initial facets, mapping fields to lists of initial values.
     """
@@ -283,22 +399,22 @@ class SeekerView(View):
     Whether or not to show a Rank column when performing keyword searches.
     """
 
-    field_columns = {}
+    field_columns = ConfigDescriptor({}, FieldOptions.FIELD_VALUE_FUNCTIONS['field_columns'])
     """
     A dictionary of field column overrides.
     """
 
-    field_labels = {}
+    field_labels = ConfigDescriptor({}, FieldOptions.FIELD_VALUE_FUNCTIONS['field_labels'])
     """
     A dictionary of field label overrides.
     """
 
-    sort_fields = {}
+    sort_fields = ConfigDescriptor({}, FieldOptions.FIELD_VALUE_FUNCTIONS['sort_fields'])
     """
     A dictionary of sort field overrides.
     """
 
-    highlight_fields = {}
+    highlight_fields = ConfigDescriptor({}, FieldOptions.FIELD_VALUE_FUNCTIONS['highlight_fields'])
     """
     A dictionary of highlight field overrides.
     """
@@ -324,7 +440,7 @@ class SeekerView(View):
     Extra context variables to use when rendering. May be passed via as_view(), or overridden as a property.
     """
 
-    field_templates = {}
+    field_templates = ConfigDescriptor({}, FieldOptions.FIELD_VALUE_FUNCTIONS['field_templates'])
     """
     A dictionary of field template overrides.
     """
@@ -1094,7 +1210,7 @@ class AdvancedSeekerView(SeekerView):
     Facet fields with selected values will automatically be added to the 'display' list (shown on the results table).
     """
 
-    value_formats = {}
+    value_formats = ConfigDescriptor({}, AdvancedFieldOptions.FIELD_VALUE_FUNCTIONS['value_formats'])
     """
     key: field_name, value: value_format function
     A dictionary of custom formats used for extracting values from mappings. 
@@ -1647,129 +1763,3 @@ class AdvancedSavedSearchView(View):
             else:
                 return SavedSearchModel.objects.none()
         return SavedSearchModel.objects.filter(**filter_kwargs)
-
-
-class FieldOptions:
-
-    @classmethod
-    def configure_seeker_view(cls, seeker_view):
-        if not seeker_view.fields:
-            return
-        
-        settings = cls._extract_settings(seeker_view.fields)
-        for k, v in settings.items():
-            setattr(seeker_view, k, v)
-
-    @classmethod
-    def _extract_settings(cls, options):
-        settings = {}
-
-        settings['display'] = [
-            option.id
-            for option in sorted(
-                options,
-                key=lambda option: option.sort_order
-            )
-            if option.display
-        ]
-        settings['facets'] = [
-            option.initialize_facet()
-            for option in options
-            if option.facet_class
-        ]
-        settings['sort_fields'] = {
-            option.id: option.field_id
-            for option in options
-            if option.sort_field
-        }
-        settings['initial_facets'] = {
-            option.field_id : option.initial
-            for option in options
-            if option.initial
-        }
-        settings['field_templates'] = {
-            option.template
-            for option in options
-            if option.template
-        }
-        settings['field_columns'] = {
-            option.id : option.column
-            for option in options
-            if option.column
-        }
-        settings['field_labels'] = {
-            option.id : option.label
-            for option in options
-            if option.label
-        }
-        settings['highlight_fields'] = {
-            option.id: option.field_id
-            for option in options
-            if option.highlight
-        }
-        settings['required_display'] = [
-            (option.id, option.required_display_index)
-            for option in options
-            if option.required_display_index is not None
-        ]
-        settings['exclude'] = [
-            option.id
-            for option in options
-            if option.exclude
-        ]
-
-        # Do not return empty settings values
-        return {k: v for k, v in settings.items() if v}
-
-    def __init__(self, id, suffix='', label=None, facet_class=None,
-                 value_formatter=None, display=False, sort_order=0, initial=None,
-                 sort_field=False, facet_kwargs=None, highlight=False,
-                 search=True, template=None, column=None, required_display_index=None,
-                 exclude=False):
-        
-        if facet_kwargs is None:
-            facet_kwargs = {}
-        
-        self.id = id
-        self.suffix = suffix
-        self.label = label
-        self.initial = initial
-        self.sort_order = sort_order
-        self.sort_field = sort_field
-        self.display = display or sort_order is not None
-        
-        self.facet_class = facet_class
-        self.facet_kwargs = {}
-        if self.label:
-            self.facet_kwargs['label'] = self.label
-        self.facet_kwargs.update(facet_kwargs)
-        
-        self.column = column
-        self.highlight = highlight
-        self.template = template
-        self.required_display_index = required_display_index
-        self.exclude = exclude
-
-    def initialize_facet(self):
-        if self.facet_class:
-            return self.facet_class(self.field_id, **self.facet_kwargs)
-        return None
-
-    @property
-    def field_id(self):
-        return self.id + self.suffix
-
-class AdvancedFieldOptions(FieldOptions):
-    @classmethod
-    def _extract_settings(cls, options):
-        settings = super(extract_settings, self)._extract_settings()
-        settings['value_formats'] = {
-            option.id: option.value_formatter
-            for option in options
-            if option.value_formatter
-        }
-        return settings
-
-    def __init__(self, id, *kwargs):
-        self.value_formatter = kwargs.pop('value_formatter', None)
-        super(AdvancedFieldOptions, self).__init__(id, **kwargs)
