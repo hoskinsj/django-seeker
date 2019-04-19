@@ -7,6 +7,6 @@ from .mapping import (
 from .registry import app_documents, documents, model_documents, register
 from .utils import delete, index, search
 from .views import AdvancedColumn, AdvancedSavedSearchView, AdvancedSeekerView, Column, SeekerView
-
+from .fieldoptions import FieldOptions, SeekerConfiguration, AdvancedSeekerConfiguration
 
 default_app_config = 'seeker.apps.SeekerConfig'

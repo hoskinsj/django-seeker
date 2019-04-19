@@ -29,7 +29,7 @@ from elasticsearch_dsl.utils import AttrList
 from .mapping import DEFAULT_ANALYZER
 from .signals import advanced_search_performed, search_complete
 from .templatetags.seeker import seeker_format
-
+from .fieldoptions import FieldApi
 
 
 seekerview_field_templates = {}
@@ -166,7 +166,7 @@ class Column(object):
         return export_val
 
 
-class SeekerView(View):
+class SeekerView(six.with_metaclass(FieldApi, View)):
     document = None
     """
     A :class:`elasticsearch_dsl.DocType` class to present a view for.
